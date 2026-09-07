@@ -65,9 +65,11 @@ describe("Tavily trace search adapter", () => {
 
     const [endpoint, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(endpoint).toBe("https://api.tavily.com/search");
-    expect(init.headers).toEqual({ "content-type": "application/json" });
+    expect(init.headers).toEqual({
+      Authorization: "Bearer server-only-test-key",
+      "Content-Type": "application/json",
+    });
     expect(JSON.parse(String(init.body))).toEqual({
-      api_key: "server-only-test-key",
       query: "face source discovery uploaded.png",
       search_depth: "advanced",
       max_results: 10,
@@ -82,12 +84,18 @@ describe("Tavily trace search adapter", () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(providerResponse({ results: [] }))
       .mockResolvedValueOnce(providerResponse({ error: "unauthorized" }, 401))
-      .mockResolvedValueOnce(providerResponse({ error: "rate limited" }, 429));
+      .mockResolvedValueOnce(providerResponse({ error: "rate limited" }, 429))
+      .mockResolvedValueOnce(providerResponse({ error: "upstream unavailable" }, 503));
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(searchSources({ query: "no match" })).resolves.toMatchObject({ status: "no_matches_found", results: [] });
     await expect(searchSources({ query: "bad key" })).resolves.toMatchObject({ status: "search_authentication_error", results: [] });
     await expect(searchSources({ query: "too many" })).resolves.toMatchObject({ status: "search_rate_limited", results: [] });
+    await expect(searchSources({ query: "provider down" })).resolves.toMatchObject({
+      status: "search_provider_error",
+      message: "Tavily provider error with HTTP 503: upstream unavailable",
+      results: [],
+    });
   });
 
   it("classifies an aborted provider request as a timeout", async () => {

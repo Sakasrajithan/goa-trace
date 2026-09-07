@@ -31,6 +31,7 @@ export type TraceSearchStatus =
   | "search_configuration_error"
   | "search_authentication_error"
   | "search_rate_limited"
+  | "search_provider_error"
   | "search_request_failed"
   | "search_request_timed_out";
 

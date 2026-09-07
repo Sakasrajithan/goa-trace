@@ -57,7 +57,7 @@ async function startServer() {
         : response.status === "search_authentication_error" ? 401
           : response.status === "search_rate_limited" ? 429
             : response.status === "search_request_timed_out" ? 504
-              : response.status === "search_request_failed" ? 502
+              : response.status === "search_request_failed" || response.status === "search_provider_error" ? 502
                 : 200;
       res.status(statusCode).json(response);
     } catch (error) {

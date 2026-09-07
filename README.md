@@ -62,7 +62,7 @@ The backend now exposes `POST /api/trace/search`. Its request body is:
 
 ```json
 {
-  "status": "search_complete | no_matches_found | search_configuration_error | search_authentication_error | search_rate_limited | search_request_failed | search_request_timed_out",
+  "status": "search_complete | no_matches_found | search_configuration_error | search_authentication_error | search_rate_limited | search_provider_error | search_request_failed | search_request_timed_out",
   "provider": "provider name",
   "message": "optional technical message",
   "results": [{ "url": "https://...", "title": "...", "platform": null, "author": null, "publishedAt": null, "imageUrl": "https://...", "similarity": null, "searchRelevance": 0.89, "faceStatus": "FACE_NOT_ANALYZED", "faceStatusMessage": "FACE NOT ANALYZED", "snippet": "..." }]
@@ -77,7 +77,7 @@ SearchProvider
 └── normalizeResults()
 ```
 
-The production provider is `TavilySearchProvider`. It calls `https://api.tavily.com/search` from the server with `search_depth: "advanced"`, `max_results: 10`, `include_answer: false`, and `include_raw_content: true`. `SEARCH_API_URL` may override the endpoint for controlled deployments, but defaults to Tavily. `SEARCH_API_KEY` is sent only in the server-side request body and never returned to the browser. Tavily’s relevance `score` is returned separately as `searchRelevance`; it is never mapped to face `similarity`.
+The production provider is `TavilySearchProvider`. It calls `https://api.tavily.com/search` from the server with `Authorization: Bearer <SEARCH_API_KEY>`, `Content-Type: application/json`, and a JSON body containing `search_depth: "advanced"`, `max_results: 10`, `include_answer: false`, and `include_raw_content: true`. `SEARCH_API_URL` may override the endpoint for controlled deployments, but defaults to Tavily. The key is never placed in the request body, returned to the browser, or written to logs. Tavily’s relevance `score` is returned separately as `searchRelevance`; it is never mapped to face `similarity`.
 
 ## Candidate analysis
 
