@@ -65,7 +65,7 @@ The backend now exposes `POST /api/trace/search`. Its request body is:
   "status": "search_complete | no_matches_found | search_configuration_error | search_authentication_error | search_rate_limited | search_request_failed | search_request_timed_out",
   "provider": "provider name",
   "message": "optional technical message",
-  "results": [{ "url": "https://...", "title": "...", "platform": "...", "author": "...", "publishedAt": "...", "similarity": 0.948, "snippet": "..." }]
+  "results": [{ "url": "https://...", "title": "...", "platform": null, "author": null, "publishedAt": null, "imageUrl": "https://...", "similarity": null, "searchRelevance": 0.89, "faceStatus": "FACE_NOT_ANALYZED", "faceStatusMessage": "FACE NOT ANALYZED", "snippet": "..." }]
 }
 ```
 
@@ -77,7 +77,11 @@ SearchProvider
 └── normalizeResults()
 ```
 
-The production provider is `TavilySearchProvider`. It calls `https://api.tavily.com/search` from the server with `search_depth: "advanced"`, `max_results: 10`, `include_answer: false`, and `include_raw_content: true`. `SEARCH_API_URL` may override the endpoint for controlled deployments, but defaults to Tavily. `SEARCH_API_KEY` is sent only in the server-side request body and never returned to the browser. Tavily’s relevance `score` is intentionally not mapped to face `similarity`; that field remains `null` until real face-comparison logic calculates it.
+The production provider is `TavilySearchProvider`. It calls `https://api.tavily.com/search` from the server with `search_depth: "advanced"`, `max_results: 10`, `include_answer: false`, and `include_raw_content: true`. `SEARCH_API_URL` may override the endpoint for controlled deployments, but defaults to Tavily. `SEARCH_API_KEY` is sent only in the server-side request body and never returned to the browser. Tavily’s relevance `score` is returned separately as `searchRelevance`; it is never mapped to face `similarity`.
+
+## Candidate analysis
+
+After Tavily returns candidates, `server/candidateAnalysis.ts` fetches public HTML pages server-side, extracts Open Graph and `<img>` image URLs, filters obvious logos/icons/pixels/decorative assets, and downloads candidate images transiently for inspection. It does not bypass authentication, persist downloaded images, or fabricate face scores. The `CandidateFaceAnalyzer` interface is the explicit model boundary: until a real face detector and embedding comparator is supplied, candidates return `similarity: null` with `FACE NOT ANALYZED`. A source that cannot be fetched returns `SOURCE CONTENT UNAVAILABLE`; a configured analyzer that finds no face returns `FACE NOT FOUND`; only an actual comparator may return `FACE MATCH ANALYZED` and a numeric similarity.
 
 ## Blockchain
 
@@ -102,7 +106,7 @@ SEARCH_API_KEY=<TAVILY_API_KEY>
 ORIGINKIT_API_KEY=
 ```
 
-The private key must be a dedicated Polygon Amoy testnet wallet. Never commit a local `.env`, expose any key in frontend JavaScript, or put a private key into a transaction payload. The WebDev project uses its managed secret store for these values. The current runtime has no Tavily key configured, so the live endpoint correctly returns `SEARCH CONFIGURATION ERROR` until the real server secret is supplied.
+The private key must be a dedicated Polygon Amoy testnet wallet. Never commit a local `.env`, expose any key in frontend JavaScript, or put a private key into a transaction payload. The WebDev project uses its managed secret store for these values. The current runtime has a server-only Tavily key configured and the live endpoint has been verified to return real enriched candidates.
 
 ## Installation
 
@@ -116,7 +120,7 @@ pnpm install
 pnpm dev
 ```
 
-Open the WebDev preview URL. Choose **LOAD LOCAL PREVIEW** or upload an image, then **START SEARCH**. With no server provider configured, the expected truthful result is **SEARCH CONFIGURATION ERROR** with **SOURCE DISCOVERY IS NOT CONFIGURED**. With a configured provider, the page renders only the returned candidates.
+Open the WebDev preview URL. Choose **LOAD LOCAL PREVIEW** or upload an image, then **START SEARCH**. With the current server-only Tavily configuration, the page renders only real returned candidates and their enrichment states. If the key is absent, the expected truthful result is **SEARCH CONFIGURATION ERROR** with **SOURCE DISCOVERY IS NOT CONFIGURED**.
 
 ## Demo flow
 
@@ -144,9 +148,8 @@ This repository intentionally stops short of claiming a face match or blockchain
 
 ## Future improvements
 
-- Add browser-side face-api detection and embedding model loading.
-- Add a server-side genuine reverse-image provider adapter.
-- Add candidate image fetch/inspection with legal/robots safeguards.
+- Add a real face detector and embedding comparator implementing `CandidateFaceAnalyzer`.
+- Add robots/terms-aware candidate fetch safeguards and stronger image heuristics.
 - Add the TraceRegistry Solidity contract and an `ethers` Amoy signer.
 - Replace the local proof record with a tRPC `proof.anchor` + `proof.verify` flow.
 - Add mismatch testing by changing candidate content before verification.

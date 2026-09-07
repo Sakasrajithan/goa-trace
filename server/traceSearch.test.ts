@@ -26,7 +26,11 @@ describe("Tavily trace search adapter", () => {
         platform: null,
         author: null,
         publishedAt: null,
+        imageUrl: null,
         similarity: null,
+        searchRelevance: 0.948,
+        faceStatus: "FACE_NOT_ANALYZED",
+        faceStatusMessage: "FACE NOT ANALYZED",
         snippet: "Provider content",
       },
     ]);

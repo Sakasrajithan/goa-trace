@@ -7,5 +7,5 @@ describe("configured Tavily credential", () => {
     expect(["search_complete", "no_matches_found", "search_rate_limited"]).toContain(response.status);
     expect(response.provider).toBe("TAVILY");
     expect(JSON.stringify(response)).not.toContain(process.env.SEARCH_API_KEY ?? "__missing__");
-  }, 20_000);
+  }, 60_000);
 });

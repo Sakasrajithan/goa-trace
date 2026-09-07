@@ -5,13 +5,23 @@ export type TraceSearchRequest = {
   imageData?: string;
 };
 
+export type FaceAnalysisStatus =
+  | "MATCH_ANALYZED"
+  | "FACE_NOT_FOUND"
+  | "SOURCE_CONTENT_UNAVAILABLE"
+  | "FACE_NOT_ANALYZED";
+
 export type TraceSearchResult = {
   url: string;
   title: string | null;
   platform: string | null;
   author: string | null;
   publishedAt: string | null;
+  imageUrl: string | null;
   similarity: number | null;
+  searchRelevance: number | null;
+  faceStatus: FaceAnalysisStatus;
+  faceStatusMessage: string | null;
   snippet: string | null;
 };
 

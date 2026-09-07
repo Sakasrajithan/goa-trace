@@ -3,6 +3,7 @@ import type {
   TraceSearchResponse,
   TraceSearchResult,
 } from "@shared/trace";
+import { enrichAndRankCandidates } from "./candidateAnalysis";
 
 const TAVILY_ENDPOINT = "https://api.tavily.com/search";
 const TAVILY_TIMEOUT_MS = 15_000;
@@ -41,8 +42,12 @@ function normalizeResult(input: unknown): TraceSearchResult | null {
     platform: null,
     author: null,
     publishedAt: null,
+    imageUrl: null,
     // Tavily's score is search relevance, not face similarity.
     similarity: null,
+    searchRelevance: typeof record.score === "number" && Number.isFinite(record.score) ? record.score : null,
+    faceStatus: "FACE_NOT_ANALYZED",
+    faceStatusMessage: "FACE NOT ANALYZED",
     snippet: nullableString(record.content) || nullableString(record.raw_content),
   };
 }
@@ -132,7 +137,7 @@ export async function searchSources(request: TraceSearchRequest): Promise<TraceS
   }
 
   try {
-    const results = await provider.searchWeb(request);
+    const results = await enrichAndRankCandidates(await provider.searchWeb(request), request);
     if (results.length === 0) {
       return {
         status: "no_matches_found",
