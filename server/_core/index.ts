@@ -8,6 +8,7 @@ import { registerStorageProxy } from "./storageProxy";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
+import { searchSources } from "../traceSearch";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -34,6 +35,36 @@ async function startServer() {
   // Configure body parser with larger size limit for file uploads
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
+  app.post("/api/trace/search", async (req, res) => {
+    try {
+      const body = req.body as {
+        faceEmbedding?: unknown;
+        query?: unknown;
+        sourceHints?: unknown;
+        imageData?: unknown;
+      };
+
+      const response = await searchSources({
+        faceEmbedding: body.faceEmbedding,
+        query: typeof body.query === "string" ? body.query : undefined,
+        sourceHints: Array.isArray(body.sourceHints)
+          ? body.sourceHints.filter((item): item is string => typeof item === "string")
+          : [],
+        imageData: typeof body.imageData === "string" ? body.imageData : undefined,
+      });
+
+      const statusCode = response.status === "search_request_failed" ? 502 : response.status === "search_configuration_error" ? 503 : 200;
+      res.status(statusCode).json(response);
+    } catch (error) {
+      console.error("[Trace Search] Invalid request:", error);
+      res.status(400).json({
+        status: "search_request_failed",
+        provider: "UNKNOWN",
+        message: "SEARCH REQUEST FAILED. Invalid request payload.",
+        results: [],
+      });
+    }
+  });
   registerStorageProxy(app);
   registerOAuthRoutes(app);
   // tRPC API

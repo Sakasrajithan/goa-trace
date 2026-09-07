@@ -15,6 +15,8 @@ import {
   Upload,
   X,
 } from "lucide-react";
+import type { TraceSearchResponse, TraceSearchResult } from "@shared/trace";
+import { hashSha256 } from "@/lib/trace";
 
 const DEMO_IMAGE =
   "data:image/svg+xml;charset=UTF-8," +
@@ -77,6 +79,12 @@ function PixelArc({ active = false }: { active?: boolean }) {
   );
 }
 
+function similarityLabel(value?: number) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "NOT CALCULATED";
+  const normalized = value <= 1 ? value * 100 : value;
+  return `${normalized.toFixed(1)}%`;
+}
+
 function TechnicalBackground() {
   return (
     <div className="technical-background" aria-hidden="true">
@@ -100,7 +108,12 @@ export default function Home() {
   const [scanReady, setScanReady] = useState(false);
   const [searching, setSearching] = useState(false);
   const [searchStep, setSearchStep] = useState(0);
-  const [searchUnavailable, setSearchUnavailable] = useState(false);
+  const [searchStatus, setSearchStatus] = useState<"idle" | "searching" | TraceSearchResponse["status"]>("idle");
+  const [searchMessage, setSearchMessage] = useState("");
+  const [searchProvider, setSearchProvider] = useState("NONE CONFIGURED");
+  const [searchResults, setSearchResults] = useState<TraceSearchResult[]>([]);
+  const [selectedResult, setSelectedResult] = useState<TraceSearchResult | null>(null);
+  const [proofHashes, setProofHashes] = useState<{ content: string; source: string } | null>(null);
   const [mobileNav, setMobileNav] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -116,7 +129,11 @@ export default function Home() {
       setFileName(file.name);
       setScanReady(true);
       setStage(0);
-      setSearchUnavailable(false);
+      setSearchStatus("idle");
+      setSearchMessage("");
+      setSearchResults([]);
+      setSelectedResult(null);
+      setProofHashes(null);
     };
     reader.readAsDataURL(file);
   };
@@ -126,11 +143,14 @@ export default function Home() {
     setFileName("local-preview.svg");
     setScanReady(true);
     setError(null);
-    setSearchUnavailable(false);
+    setSearchStatus("idle");
+    setSearchMessage("");
+    setSearchResults([]);
+    setSelectedResult(null);
     setStage(0);
   };
 
-  const startSearch = () => {
+  const startSearch = async () => {
     if (!image) {
       setError("Upload a face image before starting the trace.");
       return;
@@ -138,15 +158,61 @@ export default function Home() {
     setError(null);
     setStage(1);
     setSearching(true);
-    setSearchUnavailable(false);
+    setSearchStatus("searching");
+    setSearchMessage("");
+    setSearchResults([]);
+    setSelectedResult(null);
+    setProofHashes(null);
     setSearchStep(0);
-    searchSteps.forEach((_, index) => {
-      window.setTimeout(() => setSearchStep(index), index * 380);
-    });
-    window.setTimeout(() => {
+    window.setTimeout(() => setSearchStep(1), 180);
+
+    try {
+      const response = await fetch("/api/trace/search", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          faceEmbedding: null,
+          query: "face source discovery",
+          sourceHints: fileName ? [fileName] : [],
+          imageData: image,
+        }),
+      });
+      const payload = (await response.json()) as TraceSearchResponse;
+      setSearchProvider(payload.provider || "NONE CONFIGURED");
+      setSearchMessage(payload.message || "");
+      setSearchResults(payload.results || []);
+      setSearchStatus(payload.status);
+      if (payload.status === "search_complete" && payload.results.length > 0) {
+        setSelectedResult(payload.results[0]);
+      }
+      setSearchStep(payload.status === "search_complete" ? 4 : 1);
+    } catch (requestError) {
+      console.error("[Trace Search] Request failed in browser:", requestError);
+      setSearchProvider("BACKEND REQUEST");
+      setSearchStatus("search_request_failed");
+      setSearchMessage("SEARCH REQUEST FAILED. The backend endpoint could not be reached.");
+      setSearchResults([]);
+    } finally {
       setSearching(false);
-      setSearchUnavailable(true);
-    }, 2200);
+    }
+  };
+
+  const useSourceForProof = async () => {
+    if (!selectedResult) return;
+    const canonicalContent = [
+      selectedResult.url,
+      selectedResult.title,
+      selectedResult.platform || "",
+      selectedResult.author || "",
+      selectedResult.publishedAt || "",
+      selectedResult.snippet || "",
+    ].join("|");
+    const [content, source] = await Promise.all([
+      hashSha256(canonicalContent),
+      hashSha256(selectedResult.url),
+    ]);
+    setProofHashes({ content, source });
+    setStage(3);
   };
 
   const resetTrace = () => {
@@ -156,11 +222,31 @@ export default function Home() {
     setScanReady(false);
     setSearching(false);
     setSearchStep(0);
-    setSearchUnavailable(false);
+    setSearchStatus("idle");
+    setSearchMessage("");
+    setSearchProvider("NONE CONFIGURED");
+    setSearchResults([]);
+    setSelectedResult(null);
+    setProofHashes(null);
     setError(null);
   };
 
   const goToTrace = () => document.getElementById("trace")?.scrollIntoView({ behavior: "smooth" });
+
+  const searchTitle = searching
+    ? "SEARCHING THE WEB"
+    : searchStatus === "search_complete"
+      ? "SEARCH COMPLETE"
+      : searchStatus === "no_matches_found"
+        ? "NO MATCHING SOURCE FOUND"
+        : searchStatus === "search_configuration_error"
+          ? "SEARCH CONFIGURATION ERROR"
+          : searchStatus === "search_request_failed"
+            ? "SEARCH REQUEST FAILED"
+            : "SEARCH READY";
+  const searchSub = searching
+    ? "REQUEST IN FLIGHT / BACKEND SEARCH"
+    : searchMessage || `PROVIDER / ${searchProvider}`;
 
   return (
     <main className="forensic-shell" id="top">
@@ -251,18 +337,19 @@ export default function Home() {
                 <div className="stage-content search-content">
                   <div className="stage-intro"><span className="section-overline">02 / SEARCH</span><h3>Searching for<br /><em>the source.</em></h3><p>Compare the selected face against genuine web and social-media results.</p></div>
                   <div className="search-layout">
-                    <div className="search-visual glass-panel"><div className="scan-beam" /><PixelArc active={searching} /><strong>{searching ? searchSteps[searchStep] : searchUnavailable ? "SEARCH UNAVAILABLE" : "SEARCH READY"}</strong><small>{searching ? "REQUEST IN FLIGHT / WAITING FOR PROVIDER" : "NO EXTERNAL PROVIDER RESPONSE"}</small></div>
-                    <div className="search-status-list">{searchSteps.map((item, index) => <div className={`search-status-row ${index < searchStep || (!searching && searchUnavailable) ? "seen" : ""} ${searching && index === searchStep ? "active" : ""}`} key={item}><span>{index < searchStep || (!searching && searchUnavailable) ? <Check size={12} /> : String(index + 1).padStart(2, "0")}</span>{item}</div>)}</div>
+                    <div className="search-visual glass-panel"><div className="scan-beam" /><PixelArc active={searching} /><strong>{searching ? searchSteps[searchStep] : searchTitle}</strong><small>{searchSub}</small></div>
+                    <div className="search-status-list">{searchSteps.map((item, index) => <div className={`search-status-row ${index < searchStep || (searchStatus === "search_complete" && index <= 4) ? "seen" : ""} ${searching && index === searchStep ? "active" : ""}`} key={item}><span>{index < searchStep || (searchStatus === "search_complete" && index <= 4) ? <Check size={12} /> : String(index + 1).padStart(2, "0")}</span>{item}</div>)}</div>
                   </div>
-                  {searchUnavailable && <div className="unavailable-panel"><CircleAlert size={17} /><div><strong>SEARCH UNAVAILABLE</strong><span>Unable to reach a configured genuine search provider. No candidate, similarity score, or source URL is shown.</span></div><button className="text-button" onClick={startSearch}>RETRY</button></div>}
+                  {searchResults.length > 0 && <div className="result-list"><div className="result-list-heading"><span>SOURCE CANDIDATES</span><span>{searchProvider}</span></div>{searchResults.map((result, index) => <button className={`result-card glass-panel ${selectedResult?.url === result.url ? "selected" : ""}`} key={`${result.url}-${index}`} onClick={() => { setSelectedResult(result); setStage(2); }}><div className="result-card-index">{String(index + 1).padStart(2, "0")}</div><div className="result-card-body"><strong>{result.title}</strong><span>{result.platform || "PLATFORM NOT PROVIDED"} {result.author ? `· ${result.author}` : ""}</span><small>{result.url}</small></div><div className="result-card-score"><span>FACE SIMILARITY</span><strong>{similarityLabel(result.similarity)}</strong></div><ChevronRight size={16} /></button>)}</div>}
+                  {(searchStatus === "search_configuration_error" || searchStatus === "search_request_failed" || searchStatus === "no_matches_found") && <div className="unavailable-panel"><CircleAlert size={17} /><div><strong>{searchTitle}</strong><span>{searchMessage || "No source candidates were returned."}</span></div><button className="text-button" onClick={startSearch}>RETRY</button></div>}
                 </div>
               )}
 
               {stage === 2 && (
                 <div className="stage-content source-content">
-                  <div className="stage-intro"><span className="section-overline">03 / SOURCE</span><h3>A potential source<br /><em>will appear here.</em></h3><p>Only genuine provider results are eligible for evidence review and proof.</p></div>
-                  <div className="empty-source glass-panel"><div className="empty-source-icon"><Search size={25} /></div><div><strong>NO SOURCE AVAILABLE</strong><span>Connect a genuine search provider to populate source candidates.</span></div><div className="source-fields"><span>PLATFORM <b>—</b></span><span>SOURCE <b>—</b></span><span>AUTHOR <b>—</b></span><span>DATE <b>—</b></span><span>FACE SIMILARITY <b>—</b></span></div></div>
-                  <div className="stage-actions"><span className="file-label">POTENTIAL MATCH / NOT CALCULATED</span><button className="glass-button" onClick={() => setStage(1)}>Back to Search <ChevronRight size={15} /></button></div>
+                  <div className="stage-intro"><span className="section-overline">03 / SOURCE</span><h3>{selectedResult ? "A potential source" : "A potential source"}<br /><em>{selectedResult ? "was found." : "will appear here."}</em></h3><p>Only genuine provider results are eligible for evidence review and proof.</p></div>
+                  {selectedResult ? <div className="selected-source glass-panel"><div className="selected-source-head"><MonoBadge>POTENTIAL MATCH</MonoBadge><span>{searchProvider}</span></div><div className="selected-source-title"><h4>{selectedResult.title}</h4><a href={selectedResult.url} target="_blank" rel="noreferrer">OPEN ORIGINAL <ArrowUpRight size={14} /></a></div><div className="source-fields"><span>PLATFORM <b>{selectedResult.platform || "—"}</b></span><span>SOURCE <b>{selectedResult.url}</b></span><span>AUTHOR <b>{selectedResult.author || "—"}</b></span><span>DATE <b>{selectedResult.publishedAt || "—"}</b></span><span>FACE SIMILARITY <b>{similarityLabel(selectedResult.similarity)}</b></span></div>{selectedResult.snippet && <p className="selected-source-snippet">{selectedResult.snippet}</p>}</div> : <div className="empty-source glass-panel"><div className="empty-source-icon"><Search size={25} /></div><div><strong>NO SOURCE AVAILABLE</strong><span>Connect a genuine search provider to populate source candidates.</span></div><div className="source-fields"><span>PLATFORM <b>—</b></span><span>SOURCE <b>—</b></span><span>AUTHOR <b>—</b></span><span>DATE <b>—</b></span><span>FACE SIMILARITY <b>—</b></span></div></div>}
+                  <div className="stage-actions"><span className="file-label">{selectedResult ? "POTENTIAL MATCH / REVIEWED" : "POTENTIAL MATCH / NOT CALCULATED"}</span><div><button className="glass-button" onClick={() => setStage(1)}>Back to Search <ChevronRight size={15} /></button>{selectedResult && <button className="glass-button solid-button" onClick={useSourceForProof}>Use for Proof <Fingerprint size={15} /></button>}</div></div>
                 </div>
               )}
 
@@ -270,10 +357,10 @@ export default function Home() {
                 <div className="stage-content proof-content" id="proof">
                   <div className="stage-intro"><span className="section-overline">04 / PROOF</span><h3>Anchor the<br /><em>source.</em></h3><p>Create a deterministic fingerprint of the discovered content and record it on-chain.</p></div>
                   <div className="proof-layout">
-                    <div className="proof-fields glass-panel"><div><span>CONTENT FINGERPRINT</span><strong>—</strong><small>SHA-256 / awaiting source</small></div><div><span>SOURCE FINGERPRINT</span><strong>—</strong><small>SHA-256 / awaiting source</small></div></div>
-                    <div className="blockchain-panel glass-panel"><div className="blockchain-row"><span>NETWORK</span><strong>POLYGON AMOY</strong></div><div className="blockchain-row"><span>STATUS</span><strong>READY WHEN SOURCE IS FOUND</strong></div><div className="blockchain-flow"><span>CONTENT</span><i /><span>HASH</span><i /><span>CHAIN</span></div><button className="glass-button solid-button" disabled>Anchor on Chain <Hash size={15} /></button></div>
+                    <div className="proof-fields glass-panel"><div><span>CONTENT FINGERPRINT</span><strong>{proofHashes?.content ? `0x${proofHashes.content.slice(0, 12)}…` : "—"}</strong><small>SHA-256 / canonical source content</small></div><div><span>SOURCE FINGERPRINT</span><strong>{proofHashes?.source ? `0x${proofHashes.source.slice(0, 12)}…` : "—"}</strong><small>SHA-256 / source URL</small></div></div>
+                    <div className="blockchain-panel glass-panel"><div className="blockchain-row"><span>NETWORK</span><strong>POLYGON AMOY</strong></div><div className="blockchain-row"><span>STATUS</span><strong>{proofHashes ? "READY TO ANCHOR" : "WAITING FOR SOURCE"}</strong></div><div className="blockchain-flow"><span>CONTENT</span><i /><span>HASH</span><i /><span>CHAIN</span></div><button className="glass-button solid-button" disabled={!proofHashes}>Anchor on Chain <Hash size={15} /></button></div>
                   </div>
-                  <div className="unavailable-panel"><CircleAlert size={17} /><div><strong>PROOF NOT READY</strong><span>A real candidate source and canonical content are required before signing or broadcasting.</span></div></div>
+                  <div className="unavailable-panel"><CircleAlert size={17} /><div><strong>{proofHashes ? "BLOCKCHAIN ADAPTER NOT CONFIGURED" : "PROOF NOT READY"}</strong><span>{proofHashes ? "Fingerprints are calculated locally. Configure the server-side Polygon Amoy signer before signing or broadcasting." : "A real candidate source and canonical content are required before signing or broadcasting."}</span></div></div>
                 </div>
               )}
 

@@ -9,8 +9,8 @@ Goa Trace is a Hacker House Goa 2026 Task 3 interface for moving from **face sca
 | Requirement | Current build | Production adapter |
 | --- | --- | --- |
 | Face detection / identification | Upload flow, face scan readout, bounding-box visual, and explicit local-demo labeling | Browser `@vladmandic/face-api` detection + embedding |
-| Genuine web / social search | Replaceable provider boundary is represented in the workbench and provider copy | Server-side reverse-image provider with normalized results |
-| Matching post | Candidate discovery card with similarity, metadata, source URL, and “Potential Match” terminology | Candidate ranking using face embeddings |
+| Genuine web / social search | `POST /api/trace/search` server boundary with normalized real-result rendering | Configure a server-side provider endpoint and key |
+| Matching post | Candidate result cards with similarity only when the provider returns a calculated value | Candidate ranking using face embeddings |
 | Content hash | Real browser Web Crypto SHA-256 hash over canonical candidate content | Server-side canonicalization for untrusted input |
 | Blockchain verification | Local proof record and deterministic local re-verification; never mislabeled as an on-chain transaction | `ethers` + TraceRegistry.sol on Polygon Amoy |
 
@@ -18,13 +18,13 @@ Goa Trace is a Hacker House Goa 2026 Task 3 interface for moving from **face sca
 
 The project is a Vite + React + TypeScript + Tailwind 4 frontend inside the full-stack WebDev template. `client/src/pages/Home.tsx` owns the staged workbench UI and local proof flow. The scaffold already contains the tRPC/Express server surface for adding secure search and blockchain procedures without exposing credentials to the browser.
 
-The UI is intentionally a single-screen experience so a judge can understand the pipeline without navigating through unnecessary pages. The local demo provider is visibly labelled `DEMO / LOCAL DATA`; it is not presented as genuine web search.
+The UI is intentionally a single-screen experience so a judge can understand the pipeline without navigating through unnecessary pages. The browser calls `POST /api/trace/search`; it never receives the provider key. When the server has no provider configured, the UI reports `SEARCH CONFIGURATION ERROR` and `SOURCE DISCOVERY IS NOT CONFIGURED` instead of pretending that a result exists.
 
 ## Pipeline
 
 1. **Scan** — select an image or load the clearly labelled local demo scan.
-2. **Search** — the interface walks through visual signature and source-ranking states against the controlled local record.
-3. **Discovery** — inspect a candidate, similarity score, source URL, author, date, platform, and content text.
+2. **Search** — the browser posts non-secret scan context to `/api/trace/search` and renders backend-reported progress and response states.
+3. **Source** — inspect actual normalized provider results, similarity only when calculated, source URL, author, date, platform, and snippet.
 4. **Proof** — calculate SHA-256 content and source hashes using the Web Crypto API and create a local proof record.
 5. **Verify** — recalculate the canonical content hash and compare it with the stored local proof record.
 
@@ -47,16 +47,37 @@ Face similarity is **not proof of identity**. Goa Trace should only use language
 
 ## Search provider
 
-The visible default provider is `DEMO / LOCAL DATA`, which allows the interface to be recorded without disguising a hardcoded candidate as genuine search. The production provider should implement a replaceable server-side adapter such as:
+The backend now exposes `POST /api/trace/search`. Its request body is:
+
+```json
+{
+  "faceEmbedding": null,
+  "query": "face source discovery",
+  "sourceHints": ["uploaded-file-name"],
+  "imageData": "data:image/..."
+}
+```
+
+`faceEmbedding` is `null` until the existing face-processing layer produces a real embedding; the frontend does not invent a second representation. The response is normalized to:
+
+```json
+{
+  "status": "search_complete | no_matches_found | search_configuration_error | search_request_failed",
+  "provider": "provider name",
+  "message": "optional technical message",
+  "results": [{ "url": "https://...", "title": "...", "platform": "...", "author": "...", "publishedAt": "...", "similarity": 0.948, "snippet": "..." }]
+}
+```
+
+The configured provider is a server-side adapter:
 
 ```text
 SearchProvider
-├── reverseImageSearch()
 ├── searchWeb()
 └── normalizeResults()
 ```
 
-A production provider must return real candidate metadata, download/inspect candidate images where permitted, calculate candidate similarity, and surface the actual source URL. It must never silently fall back to a fabricated result.
+A provider endpoint is enabled only when both `SEARCH_API_URL` and `SEARCH_API_KEY` exist in the server environment. It receives the non-secret request body, returns actual provider results, and is normalized before reaching the browser. It must never silently fall back to a fabricated result.
 
 ## Blockchain
 
@@ -76,6 +97,7 @@ When adding the production adapters, configure these project secrets server-side
 ```env
 POLYGON_RPC_URL=
 PRIVATE_KEY=
+SEARCH_API_URL=
 SEARCH_API_KEY=
 ORIGINKIT_API_KEY=
 ```
@@ -94,7 +116,7 @@ pnpm install
 pnpm dev
 ```
 
-Open the WebDev preview URL. For the safe local walkthrough, choose **LOAD DEMO SCAN**, then **START TRACE**, inspect the candidate, create the SHA-256 proof, and re-verify it.
+Open the WebDev preview URL. Choose **LOAD LOCAL PREVIEW** or upload an image, then **START SEARCH**. With no server provider configured, the expected truthful result is **SEARCH CONFIGURATION ERROR** with **SOURCE DISCOVERY IS NOT CONFIGURED**. With a configured provider, the page renders only the returned candidates.
 
 ## Demo flow
 
@@ -102,9 +124,9 @@ The app is designed for a short screen recording:
 
 - The opening screen explains the product in one glance.
 - `START TRACE` jumps to the workbench.
-- `LOAD DEMO SCAN` makes the controlled data boundary visible.
-- The staged search visualization displays each operation in order.
-- The discovery card uses “Potential Match,” not “Identity Confirmed.”
+- `LOAD LOCAL PREVIEW` makes the local scan boundary visible.
+- The staged search visualization is driven by the backend response state.
+- Actual source candidates use “Potential Match,” never “Identity Confirmed.”
 - The proof panel exposes the canonical hash and explicitly states that the blockchain adapter is offline.
 - Verification compares the local hash against the stored proof record and reports the result.
 
@@ -118,7 +140,7 @@ The current demo does not upload the selected image. It only uses the browser Fi
 
 ## Limitations
 
-This repository intentionally stops short of claiming an external search or blockchain transaction when those credentials and adapters have not been configured. The local provider is labelled `DEMO / LOCAL DATA`, the proof record is labelled local, and the verification screen states that no transaction was broadcast. This is safer and more technically accurate than displaying fake transaction hashes or fabricated search results.
+This repository intentionally stops short of claiming an external search or blockchain transaction when those server credentials and adapters have not been configured. The search endpoint explicitly distinguishes configuration errors, request failures, empty results, and successful provider results. This is safer and more technically accurate than displaying fake transaction hashes or fabricated search results.
 
 ## Future improvements
 
