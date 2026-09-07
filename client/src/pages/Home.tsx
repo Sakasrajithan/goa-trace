@@ -42,11 +42,11 @@ const stages = [
 ];
 
 const searchSteps = [
-  "GENERATING VISUAL SIGNATURE",
+  "GENERATING SIGNATURE",
   "SEARCHING SOURCES",
   "COLLECTING CANDIDATES",
-  "COMPARING FACES",
-  "RANKING RESULTS",
+  "COMPARING CONTENT",
+  "RANKING MATCHES",
 ];
 
 function GoaTraceMark() {
@@ -79,7 +79,7 @@ function PixelArc({ active = false }: { active?: boolean }) {
   );
 }
 
-function similarityLabel(value?: number) {
+function similarityLabel(value?: number | null) {
   if (typeof value !== "number" || !Number.isFinite(value)) return "NOT CALCULATED";
   const normalized = value <= 1 ? value * 100 : value;
   return `${normalized.toFixed(1)}%`;
@@ -110,7 +110,7 @@ export default function Home() {
   const [searchStep, setSearchStep] = useState(0);
   const [searchStatus, setSearchStatus] = useState<"idle" | "searching" | TraceSearchResponse["status"]>("idle");
   const [searchMessage, setSearchMessage] = useState("");
-  const [searchProvider, setSearchProvider] = useState("NONE CONFIGURED");
+  const [searchProvider, setSearchProvider] = useState("TAVILY");
   const [searchResults, setSearchResults] = useState<TraceSearchResult[]>([]);
   const [selectedResult, setSelectedResult] = useState<TraceSearchResult | null>(null);
   const [proofHashes, setProofHashes] = useState<{ content: string; source: string } | null>(null);
@@ -224,7 +224,7 @@ export default function Home() {
     setSearchStep(0);
     setSearchStatus("idle");
     setSearchMessage("");
-    setSearchProvider("NONE CONFIGURED");
+    setSearchProvider("TAVILY");
     setSearchResults([]);
     setSelectedResult(null);
     setProofHashes(null);
@@ -238,12 +238,18 @@ export default function Home() {
     : searchStatus === "search_complete"
       ? "SEARCH COMPLETE"
       : searchStatus === "no_matches_found"
-        ? "NO MATCHING SOURCE FOUND"
+          ? "NO MATCHING SOURCE FOUND"
         : searchStatus === "search_configuration_error"
           ? "SEARCH CONFIGURATION ERROR"
+          : searchStatus === "search_authentication_error"
+            ? "SEARCH AUTHENTICATION ERROR"
+            : searchStatus === "search_rate_limited"
+              ? "SEARCH RATE LIMITED"
+              : searchStatus === "search_request_timed_out"
+                ? "SEARCH REQUEST TIMED OUT"
           : searchStatus === "search_request_failed"
-            ? "SEARCH REQUEST FAILED"
-            : "SEARCH READY";
+                ? "SEARCH REQUEST FAILED"
+                : "SEARCH READY";
   const searchSub = searching
     ? "REQUEST IN FLIGHT / BACKEND SEARCH"
     : searchMessage || `PROVIDER / ${searchProvider}`;
@@ -299,7 +305,7 @@ export default function Home() {
         </div>
         {error && <div className="error-line" role="alert"><CircleAlert size={15} /><span>{error}</span><button onClick={() => setError(null)} aria-label="Dismiss error"><X size={15} /></button></div>}
         <div className="workspace-frame">
-          <div className="workspace-topline"><span>TRACE / {String(stage + 1).padStart(2, "0")}</span><span className="workspace-provider">PROVIDER <strong>NOT CONFIGURED</strong></span></div>
+          <div className="workspace-topline"><span>TRACE / {String(stage + 1).padStart(2, "0")}</span><span className="workspace-provider">PROVIDER <strong>{searchProvider}</strong></span></div>
           <div className="workspace-layout">
             <aside className="stage-index" aria-label="Trace pipeline">
               {stages.map((item) => (
@@ -341,15 +347,15 @@ export default function Home() {
                     <div className="search-status-list">{searchSteps.map((item, index) => <div className={`search-status-row ${index < searchStep || (searchStatus === "search_complete" && index <= 4) ? "seen" : ""} ${searching && index === searchStep ? "active" : ""}`} key={item}><span>{index < searchStep || (searchStatus === "search_complete" && index <= 4) ? <Check size={12} /> : String(index + 1).padStart(2, "0")}</span>{item}</div>)}</div>
                   </div>
                   {searchResults.length > 0 && <div className="result-list"><div className="result-list-heading"><span>SOURCE CANDIDATES</span><span>{searchProvider}</span></div>{searchResults.map((result, index) => <button className={`result-card glass-panel ${selectedResult?.url === result.url ? "selected" : ""}`} key={`${result.url}-${index}`} onClick={() => { setSelectedResult(result); setStage(2); }}><div className="result-card-index">{String(index + 1).padStart(2, "0")}</div><div className="result-card-body"><strong>{result.title}</strong><span>{result.platform || "PLATFORM NOT PROVIDED"} {result.author ? `· ${result.author}` : ""}</span><small>{result.url}</small></div><div className="result-card-score"><span>FACE SIMILARITY</span><strong>{similarityLabel(result.similarity)}</strong></div><ChevronRight size={16} /></button>)}</div>}
-                  {(searchStatus === "search_configuration_error" || searchStatus === "search_request_failed" || searchStatus === "no_matches_found") && <div className="unavailable-panel"><CircleAlert size={17} /><div><strong>{searchTitle}</strong><span>{searchMessage || "No source candidates were returned."}</span></div><button className="text-button" onClick={startSearch}>RETRY</button></div>}
+                  {(searchStatus === "search_configuration_error" || searchStatus === "search_authentication_error" || searchStatus === "search_rate_limited" || searchStatus === "search_request_failed" || searchStatus === "search_request_timed_out" || searchStatus === "no_matches_found") && <div className="unavailable-panel"><CircleAlert size={17} /><div><strong>{searchTitle}</strong><span>{searchMessage || "No source candidates were returned."}</span></div><button className="text-button" onClick={startSearch}>RETRY</button></div>}
                 </div>
               )}
 
               {stage === 2 && (
                 <div className="stage-content source-content">
                   <div className="stage-intro"><span className="section-overline">03 / SOURCE</span><h3>{selectedResult ? "A potential source" : "A potential source"}<br /><em>{selectedResult ? "was found." : "will appear here."}</em></h3><p>Only genuine provider results are eligible for evidence review and proof.</p></div>
-                  {selectedResult ? <div className="selected-source glass-panel"><div className="selected-source-head"><MonoBadge>POTENTIAL MATCH</MonoBadge><span>{searchProvider}</span></div><div className="selected-source-title"><h4>{selectedResult.title}</h4><a href={selectedResult.url} target="_blank" rel="noreferrer">OPEN ORIGINAL <ArrowUpRight size={14} /></a></div><div className="source-fields"><span>PLATFORM <b>{selectedResult.platform || "—"}</b></span><span>SOURCE <b>{selectedResult.url}</b></span><span>AUTHOR <b>{selectedResult.author || "—"}</b></span><span>DATE <b>{selectedResult.publishedAt || "—"}</b></span><span>FACE SIMILARITY <b>{similarityLabel(selectedResult.similarity)}</b></span></div>{selectedResult.snippet && <p className="selected-source-snippet">{selectedResult.snippet}</p>}</div> : <div className="empty-source glass-panel"><div className="empty-source-icon"><Search size={25} /></div><div><strong>NO SOURCE AVAILABLE</strong><span>Connect a genuine search provider to populate source candidates.</span></div><div className="source-fields"><span>PLATFORM <b>—</b></span><span>SOURCE <b>—</b></span><span>AUTHOR <b>—</b></span><span>DATE <b>—</b></span><span>FACE SIMILARITY <b>—</b></span></div></div>}
-                  <div className="stage-actions"><span className="file-label">{selectedResult ? "POTENTIAL MATCH / REVIEWED" : "POTENTIAL MATCH / NOT CALCULATED"}</span><div><button className="glass-button" onClick={() => setStage(1)}>Back to Search <ChevronRight size={15} /></button>{selectedResult && <button className="glass-button solid-button" onClick={useSourceForProof}>Use for Proof <Fingerprint size={15} /></button>}</div></div>
+                  {selectedResult ? <div className="selected-source glass-panel"><div className="selected-source-head"><MonoBadge>SOURCE CANDIDATE</MonoBadge><span>{searchProvider}</span></div><div className="selected-source-title"><h4>{selectedResult.title}</h4><a href={selectedResult.url} target="_blank" rel="noreferrer">OPEN ORIGINAL <ArrowUpRight size={14} /></a></div><div className="source-fields"><span>PLATFORM <b>{selectedResult.platform || "—"}</b></span><span>SOURCE <b>{selectedResult.url}</b></span><span>AUTHOR <b>{selectedResult.author || "—"}</b></span><span>DATE <b>{selectedResult.publishedAt || "—"}</b></span><span>FACE SIMILARITY <b>{similarityLabel(selectedResult.similarity)}</b></span></div>{selectedResult.snippet && <p className="selected-source-snippet">{selectedResult.snippet}</p>}</div> : <div className="empty-source glass-panel"><div className="empty-source-icon"><Search size={25} /></div><div><strong>NO SOURCE AVAILABLE</strong><span>Connect a genuine search provider to populate source candidates.</span></div><div className="source-fields"><span>PLATFORM <b>—</b></span><span>SOURCE <b>—</b></span><span>AUTHOR <b>—</b></span><span>DATE <b>—</b></span><span>FACE SIMILARITY <b>—</b></span></div></div>}
+                  <div className="stage-actions"><span className="file-label">{selectedResult ? "SOURCE CANDIDATE / REVIEWED" : "SOURCE CANDIDATE / NOT CALCULATED"}</span><div><button className="glass-button" onClick={() => setStage(1)}>Back to Search <ChevronRight size={15} /></button>{selectedResult && <button className="glass-button solid-button" onClick={useSourceForProof}>Use for Proof <Fingerprint size={15} /></button>}</div></div>
                 </div>
               )}
 

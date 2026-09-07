@@ -53,7 +53,12 @@ async function startServer() {
         imageData: typeof body.imageData === "string" ? body.imageData : undefined,
       });
 
-      const statusCode = response.status === "search_request_failed" ? 502 : response.status === "search_configuration_error" ? 503 : 200;
+      const statusCode = response.status === "search_configuration_error" ? 503
+        : response.status === "search_authentication_error" ? 401
+          : response.status === "search_rate_limited" ? 429
+            : response.status === "search_request_timed_out" ? 504
+              : response.status === "search_request_failed" ? 502
+                : 200;
       res.status(statusCode).json(response);
     } catch (error) {
       console.error("[Trace Search] Invalid request:", error);

@@ -9,8 +9,8 @@ Goa Trace is a Hacker House Goa 2026 Task 3 interface for moving from **face sca
 | Requirement | Current build | Production adapter |
 | --- | --- | --- |
 | Face detection / identification | Upload flow, face scan readout, bounding-box visual, and explicit local-demo labeling | Browser `@vladmandic/face-api` detection + embedding |
-| Genuine web / social search | `POST /api/trace/search` server boundary with normalized real-result rendering | Configure a server-side provider endpoint and key |
-| Matching post | Candidate result cards with similarity only when the provider returns a calculated value | Candidate ranking using face embeddings |
+| Genuine web / social search | `POST /api/trace/search` → Tavily server boundary with normalized real-result rendering | Supply a server-side Tavily API key |
+| Matching post | Source candidate cards; similarity remains null until real face comparison considers a candidate relevant | Candidate ranking using face embeddings |
 | Content hash | Real browser Web Crypto SHA-256 hash over canonical candidate content | Server-side canonicalization for untrusted input |
 | Blockchain verification | Local proof record and deterministic local re-verification; never mislabeled as an on-chain transaction | `ethers` + TraceRegistry.sol on Polygon Amoy |
 
@@ -43,7 +43,7 @@ The UI is intentionally a single-screen experience so a judge can understand the
 
 The current browser experience is deliberately honest about the adapter boundary. The UI shows the scan, a bounding-box motif, and a local readout, but it does not claim that a real face embedding was produced. To turn the flow into the official task implementation, add `@vladmandic/face-api`, load its models from a controlled model path, and populate `faceDetected`, `faceCount`, `embedding`, `similarity`, `confidence`, and `boundingBox` from actual inference.
 
-Face similarity is **not proof of identity**. Goa Trace should only use language such as “Potential Match” and “Source discovered.”
+Face similarity is **not proof of identity**. Tavily returns are labelled “Source Candidate”; Goa Trace should only use “Potential Match” after real face-comparison logic considers a candidate relevant.
 
 ## Search provider
 
@@ -62,7 +62,7 @@ The backend now exposes `POST /api/trace/search`. Its request body is:
 
 ```json
 {
-  "status": "search_complete | no_matches_found | search_configuration_error | search_request_failed",
+  "status": "search_complete | no_matches_found | search_configuration_error | search_authentication_error | search_rate_limited | search_request_failed | search_request_timed_out",
   "provider": "provider name",
   "message": "optional technical message",
   "results": [{ "url": "https://...", "title": "...", "platform": "...", "author": "...", "publishedAt": "...", "similarity": 0.948, "snippet": "..." }]
@@ -77,7 +77,7 @@ SearchProvider
 └── normalizeResults()
 ```
 
-A provider endpoint is enabled only when both `SEARCH_API_URL` and `SEARCH_API_KEY` exist in the server environment. It receives the non-secret request body, returns actual provider results, and is normalized before reaching the browser. It must never silently fall back to a fabricated result.
+The production provider is `TavilySearchProvider`. It calls `https://api.tavily.com/search` from the server with `search_depth: "advanced"`, `max_results: 10`, `include_answer: false`, and `include_raw_content: true`. `SEARCH_API_URL` may override the endpoint for controlled deployments, but defaults to Tavily. `SEARCH_API_KEY` is sent only in the server-side request body and never returned to the browser. Tavily’s relevance `score` is intentionally not mapped to face `similarity`; that field remains `null` until real face-comparison logic calculates it.
 
 ## Blockchain
 
@@ -97,12 +97,12 @@ When adding the production adapters, configure these project secrets server-side
 ```env
 POLYGON_RPC_URL=
 PRIVATE_KEY=
-SEARCH_API_URL=
-SEARCH_API_KEY=
+SEARCH_API_URL=https://api.tavily.com/search
+SEARCH_API_KEY=<TAVILY_API_KEY>
 ORIGINKIT_API_KEY=
 ```
 
-The private key must be a dedicated Polygon Amoy testnet wallet. Never commit a local `.env`, expose the key in frontend JavaScript, or put it into a transaction payload. The WebDev project uses its managed secret store for these values.
+The private key must be a dedicated Polygon Amoy testnet wallet. Never commit a local `.env`, expose any key in frontend JavaScript, or put a private key into a transaction payload. The WebDev project uses its managed secret store for these values. The current runtime has no Tavily key configured, so the live endpoint correctly returns `SEARCH CONFIGURATION ERROR` until the real server secret is supplied.
 
 ## Installation
 
@@ -126,7 +126,7 @@ The app is designed for a short screen recording:
 - `START TRACE` jumps to the workbench.
 - `LOAD LOCAL PREVIEW` makes the local scan boundary visible.
 - The staged search visualization is driven by the backend response state.
-- Actual source candidates use “Potential Match,” never “Identity Confirmed.”
+- Tavily returns use “Source Candidate”; “Potential Match” is reserved for real comparison output, never “Identity Confirmed.”
 - The proof panel exposes the canonical hash and explicitly states that the blockchain adapter is offline.
 - Verification compares the local hash against the stored proof record and reports the result.
 
@@ -140,7 +140,7 @@ The current demo does not upload the selected image. It only uses the browser Fi
 
 ## Limitations
 
-This repository intentionally stops short of claiming an external search or blockchain transaction when those server credentials and adapters have not been configured. The search endpoint explicitly distinguishes configuration errors, request failures, empty results, and successful provider results. This is safer and more technically accurate than displaying fake transaction hashes or fabricated search results.
+This repository intentionally stops short of claiming a face match or blockchain transaction when those server credentials and adapters have not been configured. The search endpoint explicitly distinguishes configuration errors, authentication failures, rate limits, timeouts, provider failures, empty results, and successful Tavily results. This is safer and more technically accurate than displaying fake transaction hashes or fabricated search results.
 
 ## Future improvements
 
